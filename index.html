@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>KCl 보정 계산기 (Cats)</title>
+  <meta name="description" content="KCl 총 첨가량 및 최대 주입속도 계산 (제제 2 mEq/mL)">
+  <style>
+    :root{ --blue:#1d4ed8; --muted:#64748b; --bg:#f8fafc; --card:#fff; --border:#e5e7eb }
+    *{box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#f8fafc;color:#0f172a;padding:12px}
+    h2{margin:0 0 12px;font-size:1.32rem;color:#1d4ed8;text-align:center}
+    h3{margin:0 0 8px;font-size:1.06rem;color:#1d4ed8;display:flex;align-items:center;gap:10px}
+    .card{background:#fff;border:1px solid var(--blue);border-radius:12px;padding:12px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,.04)}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .ibox{border:1px solid var(--border);border-radius:10px;padding:10px;background:#f9fafb;min-width:160px;flex:1}
+    .ibox label{display:block;font-size:.92rem;margin-bottom:4px;color:#374151}
+    .ibox input[type=number]{width:100%;padding:10px;font-size:1rem;border:1px solid var(--border);border-radius:8px;background:#fff}
+    .ibox input:focus{outline:none;border-color:var(--blue)}
+    .big{font-weight:700;color:#111827}
+    .hint{font-size:.8rem;color:#64748b}
+    .note{font-size:.82rem;color:#6b7280;margin-top:6px}
+    .pillbar{display:flex;gap:8px;flex-wrap:wrap}
+    .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer}
+    .pill.active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+    .badge{display:inline-block;border:1px solid var(--border);background:#eef2ff;color:#1d4ed8;border-radius:999px;padding:2px 8px;font-size:.78rem;margin-left:8px}
+    table{border-collapse:collapse;width:100%;font-size:.85rem}
+    th,td{border:1px solid var(--border);padding:6px;text-align:center}
+    th{background:#f3f4f6;color:#374151}
+    .warn{color:#b91c1c;font-weight:600}
+    .optrow{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  </style>
+</head>
+<body>
+  <h2>⚡ KCl 보정 계산기</h2>
+
+  <!-- 1) 기본입력: 체중/수액총량만 -->
+  <div class="card">
+    <h3>🐾 기본입력</h3>
+    <div class="row">
+      <div class="ibox" style="max-width:220px">
+        <label for="bw">체중 (kg, 필수)</label>
+        <input id="bw" type="number" step="0.1" placeholder="필수입력" required>
+        <div class="hint">최대 투여율 기준: 0.5 mEq/kg/h</div>
+      </div>
+      <div class="ibox" style="max-width:220px">
+        <label for="kvol">수액 총량 (mL, 필수)</label>
+        <input id="kvol" type="number" step="50" value="500" required>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2) KCl 용량 기준 선택: 둘 중 하나 -->
+  <div class="card">
+    <h3>🧪 KCl 용량 기준 선택 <span class="hint">(둘중 선택해주세요.)</span></h3>
+    <div class="optrow" style="margin:6px 0 10px">
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="basis" id="basisSerum" checked> 혈중 K 수치 입력</label>
+      <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="basis" id="basisPreset"> 목표 mEq 선택</label>
+    </div>
+
+    <div id="serumBox" class="row">
+      <div class="ibox" style="max-width:260px">
+        <label for="serumK">혈청 K (mmol/L)</label>
+        <input id="serumK" type="number" step="0.1" placeholder="예: 3.1">
+        <div class="hint">입력 시 권장 첨가량을 자동 반영</div>
+        <div id="serumNote" class="note"></div>
+      </div>
+    </div>
+
+    <div id="presetBox" class="row" style="display:none">
+      <div class="ibox" style="min-width:260px">
+        <label>프리셋 (mEq/1L)</label>
+        <div class="pillbar" id="presetBar">
+          <div class="pill" data-t="20">20</div>
+          <div class="pill" data-t="28">28</div>
+          <div class="pill" data-t="40">40</div>
+          <div class="pill" data-t="60">60</div>
+          <div class="pill" data-t="80">80</div>
+          <div class="pill" data-t="100">100</div>
+        </div>
+        <div class="hint">버튼 탭으로 목표 첨가량을 설정</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3) 결과: 간결 표시 -->
+  <div class="card">
+    <h3>📊 계산 결과 <span id="targetBadge" class="badge">목표: 40 mEq/L</span></h3>
+    <div class="row">
+      <div class="ibox">
+        <label>총 KCl 첨가량 (mL)</label>
+        <div id="kTotalMl" class="big">-</div>
+      </div>
+      <div class="ibox">
+        <label>최대 수액속도 (mL/h)</label>
+        <div id="kMaxMl" class="big">-</div>
+        <div class="hint">현재 목표농도 기준에서 0.5 mEq/kg/h를 환산한 라인속도</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4) 권장량 표 -->
+  <div class="card">
+    <h3>📋 혈중 K 기반 권장 KCl 첨가량</h3>
+    <table>
+      <thead>
+        <tr><th>혈중 K (mmol/L)</th><th>목표첨가량 (1L)</th><th> 500mL 수액기준 KCl</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>&lt; 2.0</td><td>&gt; 80 mEq</td><td>&gt; 20 mL</td></tr>
+        <tr><td>2.0 ~ 2.5</td><td>60 mEq</td><td>15 mL</td></tr>
+        <tr><td>2.5 ~ 3.0</td><td>40 mEq</td><td>10 mL</td></tr>
+        <tr><td>3.0 ~ 3.5</td><td>28 mEq</td><td>7 mL</td></tr>
+        <tr><td>3.5 ~ 5.5</td><td>20 mEq</td><td>5 mL</td></tr>
+        <tr><td>&gt; 5.5</td><td class="warn">투여 금지</td><td>-</td></tr>
+      </tbody>
+    </table>
+    <div class="note muted" style="margin-top:8px">1mmol = 1mEq, 제제 2 mEq/mL 기준. 병원 프로토콜 우선.</div>
+  </div>
+
+<script>
+  const $ = (id)=>document.getElementById(id);
+  const fmt = (x,d=0)=> (isNaN(x)? '-' : Number(x).toFixed(d));
+
+  // Elements
+  const bw=$('bw'), kvol=$('kvol');
+  const basisSerum=$('basisSerum'), basisPreset=$('basisPreset');
+  const serumBox=$('serumBox'), presetBox=$('presetBox');
+  const serumK=$('serumK'), serumNote=$('serumNote');
+  const presetBar=$('presetBar');
+  const targetBadge=$('targetBadge');
+  const kTotalMl=$('kTotalMl'), kMaxMl=$('kMaxMl');
+
+  // State
+  let target=40; // mEq/L
+  const C = 2;   // mEq/mL (KCl 원액 농도)
+
+  // Mapping from 혈청K → 권장 target
+  function targetFromSerumK(K){
+    if(isNaN(K)) return {t:null, note:''};
+    if(K > 5.5) return {t:null, note:'⚠️ 고칼륨혈증: KCl 투여 금지'};
+    if(K < 2.0) return {t:80, note:'매우 낮음 → ≥80 mEq/L 권장 (임상 상황 고려)'};
+    if(K >= 2.0 && K < 2.5) return {t:60, note:'낮음 → 60 mEq/L 권장'};
+    if(K >= 2.5 && K < 3.0) return {t:40, note:'경도 저칼륨혈증 → 40 mEq/L 권장'};
+    if(K >= 3.0 && K < 3.5) return {t:28, note:'하한 정상 근접 → 28 mEq/L 권장'};
+    return {t:20, note:'정상/유지 보충 → 20 mEq/L 권장'}; // 3.5~5.5
+  }
+
+  function setTarget(t){
+    target = t;
+    targetBadge.textContent = `목표: ${t} mEq/L`;
+    // preset 하이라이트
+    if(presetBar){
+      presetBar.querySelectorAll('.pill').forEach(p=>{
+        p.classList.toggle('active', Number(p.dataset.t) === Number(t));
+      });
+    }
+    recalc();
+  }
+
+  function recalc(){
+    const BW = parseFloat(bw.value);
+    const V  = parseFloat(kvol.value);
+
+    // 1) 총 KCl 첨가량 (mL) — 원액 2 mEq/mL 기준
+    const totalMeq = (isNaN(V)||isNaN(target)) ? NaN : target * (V/1000);
+    const needMl   = (isNaN(totalMeq)) ? NaN : totalMeq / C;
+    kTotalMl.textContent = isNaN(needMl) ? '-' : fmt(needMl,1);
+
+    // 2) 최대 수액(라인) 속도 (mL/h)
+    //    0.5 mEq/kg/h 한도를 현재 백의 KCl 농도(target mEq/L)로 환산
+    const maxMeqHr = (isNaN(BW) || BW<=0) ? NaN : 0.5 * BW;         // mEq/h
+    const maxLineMlHr = (isNaN(maxMeqHr) || isNaN(target) || target<=0)
+      ? NaN
+      : (maxMeqHr * 1000) / target;                                 // mL/h
+    kMaxMl.textContent = isNaN(maxLineMlHr) ? '-' : fmt(maxLineMlHr,1);
+  }
+
+  // Basis toggle
+  function updateBasis(){
+    const serumMode = basisSerum.checked;
+    serumBox.style.display = serumMode ? 'flex' : 'none';
+    presetBox.style.display = serumMode ? 'none' : 'flex';
+    if(serumMode){
+      // serum 기반: 입력시 자동 setTarget
+      applySerumK();
+    }
+  }
+
+  function applySerumK(){
+    const K = parseFloat(serumK.value);
+    const {t, note} = targetFromSerumK(K);
+    serumNote.textContent = note || '';
+    if(t){ setTarget(t); } else { recalc(); }
+  }
+
+  // Preset click
+  if(presetBar){
+    presetBar.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.pill');
+      if(!btn) return;
+      const t = Number(btn.dataset.t);
+      setTarget(t);
+      serumNote.textContent = `프리셋 선택: ${t} mEq/L`;
+    });
+  }
+
+  // Listeners
+  ['input','change'].forEach(evt=>{
+    [bw,kvol].forEach(el=> el.addEventListener(evt, recalc));
+    if(serumK) serumK.addEventListener(evt, applySerumK);
+    basisSerum.addEventListener(evt, updateBasis);
+    basisPreset.addEventListener(evt, updateBasis);
+  });
+
+  // 초기 상태
+  setTarget(40);
+  updateBasis();
+  recalc();
+</script>
+</body>
+</html>
